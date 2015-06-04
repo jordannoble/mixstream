@@ -1,0 +1,18 @@
+Package: mixstream
+Type: Package
+Title: Mixture Modelling in Data Streams
+Version: 0.0.0.9000
+Date: 2015-05-31
+Authors@R: person("Jordan", "Noble", email="jn610@imperial.ac.uk",
+                  role=c("aut", "cre"))
+Description: MixStream implements online algorithms for parameter estimation of
+  finite mixture models. The online EM algorithm is used to estimate the
+  parameters of mixtures of exponential families and SGD (stochastic gradient
+  descent) is used to estimate the regression coefficients for finite mixtures
+  of generalised linear models. Moreover, MixStream provides a general framework
+  that allows users to specify their own mixture models.
+License: MIT + file LICENSE
+Imports:
+  stream,
+  mvtnorm
+ByteCompile: TRUE
