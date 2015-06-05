@@ -19,7 +19,7 @@ mixstream <- function(data, m, model, params, settings) {
 
 mixstream.default <- function(data, m, model, params, settings) {
   
-  data <- as.matrix(data)
+  data <- as.data.frame(data)
   n <- nrow(data)
   d <- ncol(data)
   
@@ -50,99 +50,110 @@ mixstream.default <- function(data, m, model, params, settings) {
   prevsign <- 0
   zeta <- 0
   adaG <- 0
+  terminate <- FALSE
   
-  for(it in 1:its) {
-    ntour <- 1 + it %/% toursize
-    endtour <- it %% toursize == 0
+  ### new touring system
+  
+  for(tour in 1:tours) {
     
-    # OLEM learning rate
-    gamma <- if(it < delay) 1 / it else it^(-rate)
-    
-    # w_j * g_j = mix prob * mix density
-    wg <- dens(data[it, ], params)
-    if(all(wg == 0)) { 
-      warning("Iter: ", it, " has 0 probability for all components.")
-      break
-    }
-    lik <- sum(wg)
-    loglik <- loglik + log(lik)
-    # conditional probabilities p_j = P(W = j | Y = y)
-    p <- wg / lik
-    
-    if (it == debugit) recover()
-    
-    # statistics update
-    sbar <- suff(data[it, ], p)
-    s <- if (suffmv) {
-      lapply(1:r, function(j) sapply(1:m, function(k) {
-        (1 - gamma) * s[[j]][[k]] + gamma * sbar[[j]][[k]]
-      }, simplify = identical(eval(suffdims[j]), 1)))
+    if (toursize == 1) {
+      batch <- as.matrix(data[tour, ])
     } else {
-      lapply(1:r, function(j) (1 - gamma) * s[[j]] + gamma * sbar[[j]])
+      firstit <- (tour - 1) * toursize + 1
+      lastit <- tour * toursize
+      batch <- as.matrix(data[firstit:lastit, ])
     }
     
-    # rolling average of s
-    if (toursize > 1) {
-      s <- rolling_avg(s, prevs, it %% toursize, 0)
-      prevs <- s 
+    batchsbar <- 0
+    batchscore <- 0
+    
+    for(i in 1:toursize) {
+      
+      wg <- dens(batch[i, ], params)
+      if(all(wg == 0)) { 
+        warning("Iter: ", i, " in tour ", tour,
+                " has 0 probability for all components.")
+        terminate <- TRUE
+        break
+      }
+      
+      lik <- sum(wg)
+      loglik <- loglik + log(lik)
+      p <- wg / lik
+      sbar <- suff(batch[i, ], p)
+      batchsbar <- mixstream_agg(sbar, batchsbar)
+      
+      if (sgd) {
+        # zero probability mixture components don't contribute to beta updates
+        A <- which(wg != 0)
+        wA <- wg[A]
+        tmp <- rep(0, m)
+        tmp[A] <- ((1 + log(wA)) * lik - sum(wA * log(wA))) / lik / lik
+        grad <- mapply(`*`, score(unname(batch[i, ]), params), tmp,
+                             SIMPLIFY = FALSE)
+        batchscore <- mixstream_agg(grad, batchscore)
+        ## add termination check for infinite batch score?
+        
+        if (any(is.na(unlist(batchscore)))) {
+          warning("beta diverged to infinity.")
+          break
+          terminate <- TRUE
+        }
+      }
+      
     }
-
-    # update regression coefficients via SGD
-    if(sgd) {
+    
+    # check for any convergence issues
+    if (terminate) break
+    
+    gamma <- if (delay < tour * toursize) (tour)^(-rate) else 1 / tour
+    
+    # Stochastic E-step
+    s <- mixstream_agg(s, batchsbar, 1 - gamma, gamma / toursize)
+    
+    # M-step (update params)
+    if(delay <= tour * toursize) params[paramnames] <- upd(s)
+    
+    # SGD update
+    if (sgd) {
+    
       # decreasing learning rate eta
-      if(!is.null(eta1) && !is.null(eta2)) eta <- eta1 / (1 + eta1 * eta2 * it)
-      # zero probability mixture components don't contribute to beta updates
-      A <- which(wg != 0)
-      wA <- wg[A]
-      tmp <- rep(0, m)
-      tmp[A] <- (eta * ((1 + log(wA)) * lik - sum(wA * log(wA)) ) / lik ) / lik
-      beta_upd <- mapply(`*`, score(unname(data[it, ]), params), tmp,
-                         SIMPLIFY = FALSE)
-      #ADAGRAD
+      if(all(!is.null(c(eta1, eta2)))) eta <- eta1 / (1 + eta1 * eta2 * tour)
+      
+      #AdaGrad
       if (adagrad) {
-        adaG <- mapply(function(u, v) sqrt(u^2 + (v/eta)^2), adaG, beta_upd,
-                       SIMPLIFY = FALSE)
-        beta_upd <- mapply(`/`, beta_upd, adaG, SIMPLIFY = FALSE)
+        adaG <- mapply(function(u, v) {
+          sqrt(u^2 + (v / toursize)^2)
+        }, adaG, batchscore, SIMPLIFY = FALSE)
+        batchscore <- mapply(`/`, batchscore, adaG, SIMPLIFY = FALSE)
       }      
       
       # RPROP
       if (rprop > 0) {
-        newsign <- lapply(beta_upd, sign)
+        newsign <- lapply(batchscore, sign)
         zeta <- mapply(function(i, j, k) 1 + rprop * sign(i*j) * k,
-                       newsign, prevsign, zeta,
-                       SIMPLIFY = FALSE)
-        beta_upd <- mapply(`*`, beta_upd, zeta, SIMPLIFY = FALSE)
+                       newsign, prevsign, zeta, SIMPLIFY = FALSE)
+        batchscore <- mapply(`*`, batchscore, zeta, SIMPLIFY = FALSE)
         prevsign <- newsign 
       }
-      params$beta <- mapply(`+`, params$beta, beta_upd, SIMPLIFY = FALSE)
-      if (any(is.infinite(unlist(params$beta)))) {
-        warning("beta diverged to infinity.")
-        break
-      }
-    }
 
-    # update parameters if out of inhibition phase
-    if(it >= delay) {      
-
-      # update parameters if tour is over
-      if(endtour) {
-        
-        params[paramnames] <- upd(s)
-        
-        # Polyak-Ruppert averaging
-        if(PRavg > 0) {
-          if (ntour > PRavg) {
-            params <- rolling_avg(params, prevparams, ntour, PRavg)
-          }
-          prevparams <- params
-        }
-        
-      }
+      params$beta <- mixstream_agg(params$beta, batchscore, 1, eta / toursize)
       
     }
     
+    # Polyak-Ruppert averaging
+    if(PRavg > 0) {
+      if (tour >= PRavg) {
+        params <- rolling_avg(params, prevparams, tour, PRavg)
+      }
+      prevparams <- params
+    }
+    
     # store parameters in history
-    if (keep_history & endtour) history[[ntour]] <- params
+    if (keep_history) history[[tour + 1]] <- params
+    
+    # debug
+    if(tour == debugtour) browser()
     
   }
   
@@ -160,6 +171,19 @@ mixstream.default <- function(data, m, model, params, settings) {
   
   }) # end with
   
+}
+
+mixstream_agg <- function(x, y, a = 1, b = 1) {
+  if (identical(y, 0)) return(x)
+  mapply(function(xi, yi) {
+    if (!is.list(xi)) {
+      a * xi + b * yi
+    } else {
+      mapply(function(xij, yij) {
+        a * xij + b * yij 
+      }, xi, yi, SIMPLIFY = FALSE) 
+    }
+  }, x, y, SIMPLIFY = FALSE) 
 }
 
 rolling_avg <- function(newparams, prevparams, it, n0) {
@@ -182,21 +206,21 @@ rolling_avg <- function(newparams, prevparams, it, n0) {
 plot.mixstream <- function(x, paramname = "props", trueparams = NULL, ...) {
   
   if (is.null(x$history)) stop("mixstream object has no history.")
-  if (!is.null(dim(x$params[[paramname]]))) stop("matrix params not supported.")
+  
   ph <- x$history[[paramname]]
+  if (is.null(ph)) stop("no parameter named ", paramname, ".")
+  if (!is.null(dim(ph))) stop("matrix parameters not supported.")
+  
   m <- x$init$m
   pl <- length(ph[[1]][[1]])
   
   trueline <- !is.null(trueparams)
   if (!is.null(trueparams[[paramname]])) trueparams <- trueparams[[paramname]]
-  print(trueparams)
   
   # prettier plotting
   par(mar = c(5.1, 6.15, 4.1, 2.1), cex.lab = 1.5)
   if(paramname == 'props') paramname <- 'omega'
-  
-  
-  
+
   if(pl == 1) {
     par(mfrow=c(m, 1))
     for(i in 1:m) {
@@ -204,7 +228,6 @@ plot.mixstream <- function(x, paramname = "props", trueparams = NULL, ...) {
            ylab = bquote(hat(.(as.symbol(paramname)))[.(i)]),
            xlab = "Tour",
            ...)
-      print(trueparams)
       if (trueline) abline(h = trueparams[i], lty = 2, col = 'red')
     }
   } else {
@@ -216,15 +239,12 @@ plot.mixstream <- function(x, paramname = "props", trueparams = NULL, ...) {
              xlab = "Tour",
              ...) 
         if (trueline) {
-          print(trueparams[[i]][k])
           abline(h = trueparams[[i]][k], lty = 2, col = 'red')
         }
       }
     }
   }
-  
-  
-  
+
 }
 
 mixstream_tune <- function(data, m, model, params,

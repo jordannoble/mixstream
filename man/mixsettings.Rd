@@ -7,8 +7,8 @@
 \title{mixsettings}
 \usage{
 mixsettings(tours, toursize, rate = 0.6, delay = 20, PRavg = 0,
-  keep_history = FALSE, debugit = 0, eta = 0.01, eta1 = NULL,
-  eta2 = NULL, rprop = 0)
+  keep_history = FALSE, debugtour = 0, eta = 0.01, eta1 = NULL,
+  eta2 = NULL, rprop = 0, adagrad = FALSE)
 
 is.mixsettings(x)
 
@@ -44,7 +44,7 @@ output of the \code{\link{mixstream}} function. Warning: this setting is not
 recommended for a large number of data points due to the large memory
 requirement. The default is \code{FALSE}.}
 
-\item{debugit}{an integer representing the iteration at which to pause the
+\item{debugtour}{an integer representing the tour at which to pause the
 algorithm and open up the R browser. Useful for debugging. The default is 0,
 i.e the algorithm is not interrupted by default.}
 
@@ -69,6 +69,9 @@ provide faster convergence. Here the score refers to the derivative of the
 expectation of the complete log-likelihood with respect to the parameters.
 The default is 0, i.e. by default the learning rate won't be increased or
 decreased.}
+
+\item{adagrad}{logical. If \code{TRUE}, the AdaGrad algorithm is used to
+continuously adapt the learning rate to the data.}
 
 \item{x}{a list to be coerced or object to be verified.}
 }

@@ -25,7 +25,7 @@
 #' output of the \code{\link{mixstream}} function. Warning: this setting is not
 #' recommended for a large number of data points due to the large memory
 #' requirement. The default is \code{FALSE}.
-#' @param debugit an integer representing the iteration at which to pause the
+#' @param debugtour an integer representing the tour at which to pause the
 #' algorithm and open up the R browser. Useful for debugging. The default is 0,
 #' i.e the algorithm is not interrupted by default.
 #' @param eta a double representing a constant learning rate when using SGD to
@@ -64,7 +64,7 @@
 #' is a valid \code{mixsettings} object.
 #' @seealso \code{\link{mixstream}}
 mixsettings <- function(tours, toursize, rate = 0.6, delay = 20, PRavg = 0,
-                         keep_history = FALSE, debugit = 0, eta = 0.01,
+                         keep_history = FALSE, debugtour = 0, eta = 0.01,
                          eta1 = NULL, eta2 = NULL, rprop = 0, adagrad = FALSE) {
   structure(mget(ls()), class='mixsettings')
 }
@@ -73,7 +73,7 @@ mixsettings <- function(tours, toursize, rate = 0.6, delay = 20, PRavg = 0,
 is.mixsettings <- function(x) {
   if (!inherits(x, "mixsettings") | !is.list(x) | length(x) == 0) return(FALSE)
   req_names <- c('tours', 'toursize', 'rate', 'delay', 'PRavg', 'keep_history',
-                 'debugit', 'eta', 'eta1', 'eta2', 'rprop', 'adagrad')
+                 'debugtour', 'eta', 'eta1', 'eta2', 'rprop', 'adagrad')
   if (any(!sapply(req_names, function(a) a %in% names(x)))) return(FALSE)
   TRUE
 }
