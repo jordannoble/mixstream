@@ -72,15 +72,16 @@ mixstream.default <- function(data, m, model, params, settings) {
       wg <- dens(batch[i, ], params)
       if(all(wg == 0)) { 
         warning("Iter: ", i, " in tour ", tour,
-                " has 0 probability for all components.")
+                " has 0 probability for all components. Try decreasing the ",
+                "learning rate.")
         terminate <- TRUE
         break
       }
       
       lik <- sum(wg)
       loglik <- loglik + log(lik)
-      p <- wg / lik
-      sbar <- suff(batch[i, ], p)
+      wbar <- wg / lik
+      sbar <- suff(batch[i, ], wbar)
       batchsbar <- mixstream_agg(sbar, batchsbar)
       
       if (sgd) {
@@ -88,16 +89,16 @@ mixstream.default <- function(data, m, model, params, settings) {
         A <- which(wg != 0)
         wA <- wg[A]
         tmp <- rep(0, m)
-        tmp[A] <- ((1 + log(wA)) * lik - sum(wA * log(wA))) / lik / lik
+        tmp[A] <- 1 / sum(wA)
         grad <- mapply(`*`, score(unname(batch[i, ]), params), tmp,
                              SIMPLIFY = FALSE)
         batchscore <- mixstream_agg(grad, batchscore)
-        ## add termination check for infinite batch score?
-        
-        if (any(is.na(unlist(batchscore)))) {
-          warning("beta diverged to infinity.")
-          break
+
+        if (any(is.na(unlist(batchscore)))
+            | any(is.infinite(unlist(batchscore)))) {
+          warning("beta diverged to infinity. Try decreasing the learning rate")
           terminate <- TRUE
+          break
         }
       }
       
