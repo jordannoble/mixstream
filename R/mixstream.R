@@ -17,7 +17,7 @@ mixstream <- function(data, m, model, params, settings) {
   UseMethod('mixstream')
 }
 
-mixstream.default <- function(data, m, model, params, settings) {
+mixstream.default <- function(data, m, model, params, settings = NULL) {
   
   data <- as.data.frame(data)
   n <- nrow(data)
@@ -56,6 +56,9 @@ mixstream.default <- function(data, m, model, params, settings) {
   
   for(tour in 1:tours) {
     
+    # debug
+    if(tour == debugtour) browser()
+    
     if (toursize == 1) {
       batch <- as.matrix(data[tour, ])
     } else {
@@ -72,7 +75,7 @@ mixstream.default <- function(data, m, model, params, settings) {
       wg <- dens(batch[i, ], params)
       if(all(wg == 0)) { 
         warning("Iter: ", i, " in tour ", tour,
-                " has 0 probability for all components. Try decreasing the ",
+                " : 0 probability for all components. Try decreasing the ",
                 "learning rate.")
         terminate <- TRUE
         break
@@ -96,7 +99,9 @@ mixstream.default <- function(data, m, model, params, settings) {
 
         if (any(is.na(unlist(batchscore)))
             | any(is.infinite(unlist(batchscore)))) {
-          warning("beta diverged to infinity. Try decreasing the learning rate")
+          warning("Iter: ", i, " in tour ", tour,
+                  " : beta diverged to infinity. ",
+                  "Try decreasing the learning rate.")
           terminate <- TRUE
           break
         }
@@ -153,9 +158,6 @@ mixstream.default <- function(data, m, model, params, settings) {
     # store parameters in history
     if (keep_history) history[[tour + 1]] <- params
     
-    # debug
-    if(tour == debugtour) browser()
-    
   }
   
   output <- list(history = NULL, init = init, loglik = loglik, params = params)
@@ -204,48 +206,50 @@ rolling_avg <- function(newparams, prevparams, it, n0) {
   out
 }
 
-plot.mixstream <- function(x, paramname = "props", trueparams = NULL, ...) {
+plot.mixstream <- function(x, paramname = "props", trueparams = NULL,
+                           comp = NULL, mix = NULL, xlab = "Tour", ...) {
   
   if (is.null(x$history)) stop("mixstream object has no history.")
+  
+  if(is.null(mix)) mix <- 1:x$init$m
+     
+  trueline <- !is.null(trueparams)
   
   ph <- x$history[[paramname]]
   if (is.null(ph)) stop("no parameter named ", paramname, ".")
   if (!is.null(dim(ph))) stop("matrix parameters not supported.")
   
-  m <- x$init$m
   pl <- length(ph[[1]][[1]])
+  if (is.null(comp)) comp <- 1:pl
   
-  trueline <- !is.null(trueparams)
   if (!is.null(trueparams[[paramname]])) trueparams <- trueparams[[paramname]]
   
-  # prettier plotting
-  par(mar = c(5.1, 6.15, 4.1, 2.1), cex.lab = 1.5)
+  # omega represents mixture proportion
   if(paramname == 'props') paramname <- 'omega'
-
+  
   if(pl == 1) {
-    par(mfrow=c(m, 1))
-    for(i in 1:m) {
+    for(i in mix) {
       plot(sapply(1:length(ph), function(j) ph[[j]][i]), type='l',
            ylab = bquote(hat(.(as.symbol(paramname)))[.(i)]),
-           xlab = "Tour",
+           xlab = xlab,
            ...)
       if (trueline) abline(h = trueparams[i], lty = 2, col = 'red')
     }
   } else {
-    par(mfrow=c(pl*m, 1))
-    for(i in 1:m) {
-      for(k in 1:pl) {
+    
+    for(i in mix) {
+      for(k in comp) {
         plot(sapply(1:length(ph), function(j) ph[[j]][[i]][k]), type='l',
              ylab = bquote(hat(.(as.symbol(paramname)))[list(.(i),.(k))]),
-             xlab = "Tour",
-             ...) 
+             xlab = xlab,
+             ...)
         if (trueline) {
           abline(h = trueparams[[i]][k], lty = 2, col = 'red')
         }
       }
     }
   }
-
+  
 }
 
 mixstream_tune <- function(data, m, model, params,
@@ -276,12 +280,39 @@ test_fit <- function(x, newdata) {
   
 }
 
-mixstream_init <- function(data, m, model, params = NULL,
-                           settings = NULL, n = NULL, its = 60,
-                           noise = 0) {
+mixstream_init <- function(data, m, model, method = c("kmeans", "bin"),
+                           params = NULL, settings = NULL,
+                           n = NULL, its = 60, noise = 0) {
+  
+  method <- match.arg(method)
+  family <- model$family
   
   data <- as.data.frame(data)
   if (is.null(n)) n <- nrow(data) else data <- data[1:n, ]
+  
+  out <- list()
+  
+#   if (method == "kmeans") {
+#     
+#     k <- kmeans(data, m)
+#     mu <- lapply(1:m, function(r) k$centers[r, ])
+#     clusters <- lapply(1:m, function(j) data[which(k$cluster == j), ])
+#     sigma <- lapply(clusters, cov)
+#     
+#     out$props <- k$size / n
+#     if (family == "normal" || family == "mvnormal") {
+#       out$mu <- mu
+#       out$sigma <- sigma
+#     } else if (family == "poisson") {
+#       out$lambda <- mu
+#     } else if (family == "binomial") {
+#       out$n <- params$size
+#       out$p <- mu / params$size
+#     }
+#     
+#     return(out)
+#     
+#   }
   
   if(is.null(params$props)) {
     propslst <- lapply(1:its, function(x) {
