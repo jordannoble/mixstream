@@ -73,9 +73,9 @@ mixstream.default <- function(data, m, model, params, settings = NULL) {
     for(i in 1:toursize) {
       
       wg <- dens(batch[i, ], params)
-      if(all(wg == 0)) { 
+      if (any(is.na(wg))) {
         warning("Iter: ", i, " in tour ", tour,
-                " : 0 probability for all components. Try decreasing the ",
+                " : NaN probability. Try decreasing the ",
                 "learning rate.")
         terminate <- TRUE
         break
@@ -88,13 +88,8 @@ mixstream.default <- function(data, m, model, params, settings = NULL) {
       batchsbar <- mixstream_agg(sbar, batchsbar)
       
       if (sgd) {
-        # zero probability mixture components don't contribute to beta updates
-        A <- which(wg != 0)
-        wA <- wg[A]
-        tmp <- rep(0, m)
-        tmp[A] <- 1 / sum(wA)
-        grad <- mapply(`*`, score(unname(batch[i, ]), params), tmp,
-                             SIMPLIFY = FALSE)
+
+        grad <- score(unname(batch[i, ]), params, wbar)
         batchscore <- mixstream_agg(grad, batchscore)
 
         if (any(is.na(unlist(batchscore)))
@@ -272,6 +267,11 @@ mixstream_tune <- function(data, m, model, params,
   
 }
 
+rprops <- function(m) {
+  tmp <- runif(m)
+  tmp / sum(tmp)
+}
+
 test_fit <- function(x, newdata) {
   
   newdata <- as.data.frame(newdata)
@@ -282,7 +282,7 @@ test_fit <- function(x, newdata) {
 
 mixstream_init <- function(data, m, model, method = c("kmeans", "bin"),
                            params = NULL, settings = NULL,
-                           n = NULL, its = 60, noise = 0) {
+                           n = NULL, its = 60, noise = 0, tol = 0.05) {
   
   method <- match.arg(method)
   family <- model$family
@@ -316,8 +316,11 @@ mixstream_init <- function(data, m, model, method = c("kmeans", "bin"),
   
   if(is.null(params$props)) {
     propslst <- lapply(1:its, function(x) {
-      tmp <- runif(m)
-      tmp / sum(tmp)
+      props <- rprops(m)
+      while(any(props < tol)) {
+        props <- rprops(m)
+      }
+      props
     })
   } else {
     propslst <- list(params$props)

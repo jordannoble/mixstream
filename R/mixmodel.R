@@ -194,12 +194,7 @@ mixmodel <- function(family, type, invlink = NULL, dlink = NULL) {
         x <- y[-1]
         eta <- sapply(params$beta, `%*%`, x)
         lambda <- invlink(eta)
-        tmp <- exp(-lambda + y[1] * log(lambda))
-        if (any(is.infinite(tmp))) {
-          # Stirling's approximation to prevent overflow
-          tmp <- exp(y[1] - lambda) * (lambda / y[1])^y[1] / sqrt(2*pi*y[1])
-        }
-        params$props * tmp
+        params$props * exp(dpois(y[1], lambda, log = TRUE))
       },
       binomial = function(y, params) {
         x <- y[-1]
@@ -248,18 +243,13 @@ mixmodel <- function(family, type, invlink = NULL, dlink = NULL) {
           # not yet supported (have to deal with nuisance sigma^2)   
           NULL
         },
-        poisson = function(y, params) {
+        poisson = function(y, params, wbar) {
           x <- y[-1]
           eta <- sapply(params$beta, `%*%`, x)
           lambda <- sapply(eta, invlink)
-          tmp <- sapply(lambda, function(l) exp((y[1] - 1) * log(l) - l))
-          if (any(is.infinite(tmp))) {
-            # Stirling's approximation
-            tmp <- exp(y[1] - lambda) * (lambda / y[1])^y[1] / lambda / 
-              sqrt(2*pi * y[1])
-          } 
           lapply(1:length(lambda), function(j) {
-            params$props[j] * x * (y[1] - lambda[j]) * tmp[j] / dlink(lambda[j])
+            params$props[j] * x * (y[1] - lambda[j]) * wbar[j] /
+              dlink(lambda[j]) / lambda[j]
           })
         },
         binomial = function(y, params) {
