@@ -88,7 +88,9 @@ rmixture <- function(n, m, model, params, data = NULL, shuffle = TRUE) {
   pos <- c(0, cumsum(mixture_split))
   resp <- data.frame()
   for (j in 1:m) {
-    mix_params <- lapply(params[which(names(params) != "props")], `[[`, j)
+    mix_params <- lapply(params[which(names(params) != "props")], function(x) {
+      x[[min(j, length(x))]]
+    })
     mix_params <- c(props = mixture_split[j], mix_params)
     if (type == "mixglm") {
       mix_params$beta <- NULL
